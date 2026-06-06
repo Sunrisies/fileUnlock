@@ -46,6 +46,12 @@ unsafe extern "system" {
         nSize: usize,
         lpNumberOfBytesRead: *mut usize,
     ) -> i32;
+
+    fn CreateToolhelp32Snapshot(dwFlags: u32, th32ProcessID: u32) -> isize;
+
+    fn Process32FirstW(hSnapshot: isize, lppe: *mut PROCESSENTRY32W) -> i32;
+
+    fn Process32NextW(hSnapshot: isize, lppe: *mut PROCESSENTRY32W) -> i32;
 }
 
 // ─── ntdll API FFI ─────────────────────────────────────
@@ -90,6 +96,21 @@ unsafe extern "system" {
     ) -> i32;
 
     fn RmEndSession(dwSessionHandle: u32) -> i32;
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct PROCESSENTRY32W {
+    dw_size: u32,
+    cnt_usage: u32,
+    th32_process_id: u32,
+    th32_default_heap_id: u64,
+    th32_module_id: u32,
+    cnt_threads: u32,
+    th32_parent_process_id: u32,
+    pc_pri_class_base: i32,
+    dw_flags: u32,
+    sz_exe_file: [u16; 260],
 }
 
 #[repr(C)]
@@ -152,6 +173,9 @@ const PROCESS_COMMAND_LINE_INFORMATION: u32 = 60;
 // NTSTATUS
 const STATUS_SUCCESS: i32 = 0;
 
+// Toolhelp32
+const TH32CS_SNAPPROCESS: u32 = 0x00000002;
+
 // Console colors
 const FOREGROUND_RED: u16 = 4;
 const FOREGROUND_GREEN: u16 = 2;
@@ -178,6 +202,7 @@ fn main() {
     match cmd {
         "check" | "检查" => cmd_check(path),
         "delete" | "删除" => cmd_delete(path),
+        "ps" | "进程" => cmd_ps(path),
         "rename" | "重命名" | "move" | "移动" => {
             if args.len() < 4 {
                 eprintln!("用法: {} rename <源路径> <目标路径>", args[0]);
@@ -207,12 +232,14 @@ fn print_usage(prog: &str) {
     eprintln!("  {prog} delete  <路径>             安全删除（先检查）");
     eprintln!("  {prog} rename  <源路径> <目标>     安全重命名/移动（先检查）");
     eprintln!("  {prog} move    <源路径> <目标>     同上");
+    eprintln!("  {prog} ps      <进程名>           搜索正在运行的进程");
     eprintln!();
     eprintln!("中文别名（等价）:");
     eprintln!("  check  = 检查");
     eprintln!("  delete = 删除");
     eprintln!("  rename = 重命名");
     eprintln!("  move   = 移动");
+    eprintln!("  ps     = 进程");
     eprintln!();
     eprintln!("例子:");
     eprintln!("  {prog} 检查 Cargo.toml");
@@ -719,6 +746,62 @@ fn cmd_rename(src: &str, dst: &str) {
             print_red("❌ 移动/重命名失败");
             eprintln!("  {e}");
             process::exit(2);
+        }
+    }
+}
+
+// ─── 进程搜索 ──────────────────────────────────────────
+
+/// 按名称搜索正在运行的进程（模糊匹配）
+fn cmd_ps(name: &str) {
+    unsafe {
+        let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if snapshot == INVALID_HANDLE_VALUE {
+            print_red("❌ 无法创建进程快照\n");
+            process::exit(2);
+        }
+
+        let mut pe: PROCESSENTRY32W = std::mem::zeroed();
+        pe.dw_size = std::mem::size_of::<PROCESSENTRY32W>() as u32;
+
+        let name_lower = name.to_lowercase();
+        let mut found = false;
+
+        if Process32FirstW(snapshot, &mut pe) != 0 {
+            loop {
+                let exe_name = String::from_utf16_lossy(&pe.sz_exe_file)
+                    .trim_end_matches('\0')
+                    .to_string();
+
+                if exe_name.to_lowercase().contains(&name_lower) {
+                    if !found {
+                        print_yellow(&format!(" 搜索进程: {name}\n"));
+                        found = true;
+                    }
+                    let pid = pe.th32_process_id;
+                    let exe_path = get_process_exe_path(pid);
+                    print!("   ");
+                    print_red("·");
+                    // 去掉 .exe 后缀显示更干净
+                    let show_name = exe_name.strip_suffix(".exe").unwrap_or(&exe_name);
+                    println!(" PID {pid:<8} {show_name}");
+                    if let Some(ref ep) = exe_path {
+                        if !ep.ends_with(&exe_name) {
+                            println!("           路径: {ep}");
+                        }
+                    }
+                }
+
+                if Process32NextW(snapshot, &mut pe) == 0 {
+                    break;
+                }
+            }
+        }
+
+        CloseHandle(snapshot);
+
+        if !found {
+            print_yellow(&format!(" 未找到匹配的进程: {name}\n"));
         }
     }
 }
