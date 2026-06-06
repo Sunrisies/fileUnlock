@@ -52,6 +52,8 @@ unsafe extern "system" {
     fn Process32FirstW(hSnapshot: isize, lppe: *mut PROCESSENTRY32W) -> i32;
 
     fn Process32NextW(hSnapshot: isize, lppe: *mut PROCESSENTRY32W) -> i32;
+
+    fn TerminateProcess(hProcess: isize, uExitCode: u32) -> i32;
 }
 
 // ─── ntdll API FFI ─────────────────────────────────────
@@ -166,6 +168,7 @@ const ERROR_ACCESS_DENIED: u32 = 5;
 const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
 const PROCESS_QUERY_INFORMATION: u32 = 0x0400;
 const PROCESS_VM_READ: u32 = 0x0010;
+const PROCESS_TERMINATE: u32 = 0x0001;
 
 // NtQueryInformationProcess info classes
 const PROCESS_COMMAND_LINE_INFORMATION: u32 = 60;
@@ -203,6 +206,7 @@ fn main() {
         "check" | "检查" => cmd_check(path),
         "delete" | "删除" => cmd_delete(path),
         "ps" | "进程" => cmd_ps(path),
+        "kill" | "结束" => cmd_kill(path),
         "rename" | "重命名" | "move" | "移动" => {
             if args.len() < 4 {
                 eprintln!("用法: {} rename <源路径> <目标路径>", args[0]);
@@ -233,6 +237,7 @@ fn print_usage(prog: &str) {
     eprintln!("  {prog} rename  <源路径> <目标>     安全重命名/移动（先检查）");
     eprintln!("  {prog} move    <源路径> <目标>     同上");
     eprintln!("  {prog} ps      <进程名>           搜索正在运行的进程");
+    eprintln!("  {prog} kill    <PID>              结束指定进程");
     eprintln!();
     eprintln!("中文别名（等价）:");
     eprintln!("  check  = 检查");
@@ -240,12 +245,14 @@ fn print_usage(prog: &str) {
     eprintln!("  rename = 重命名");
     eprintln!("  move   = 移动");
     eprintln!("  ps     = 进程");
+    eprintln!("  kill   = 结束");
     eprintln!();
     eprintln!("例子:");
     eprintln!("  {prog} 检查 Cargo.toml");
     eprintln!("  {prog} 删除 D:\\锁定文件.txt");
     eprintln!("  {prog} 重命名 old.txt new.txt");
     eprintln!("  {prog} move   源文件.exe D:\\备份\\");
+    eprintln!("  {prog} kill   61928");
     eprintln!();
     eprintln!("参数:");
     eprintln!("  -h, --help    显示此帮助信息");
@@ -753,6 +760,158 @@ fn cmd_rename(src: &str, dst: &str) {
 // ─── 进程搜索 ──────────────────────────────────────────
 
 /// 按名称搜索正在运行的进程（模糊匹配）
+// ─── 结束进程 ──────────────────────────────────────────
+
+/// 结束进程 — 支持按 PID 或按名称
+///
+/// 自动识别:
+///   `kill 61928`             → 按 PID 结束
+///   `kill RealSense.Viewer`  → 按名称搜索后结束全部匹配
+fn cmd_kill(input: &str) {
+    // 尝试按 PID（纯数字）
+    if let Ok(pid) = input.parse::<u32>() {
+        return kill_by_pid(pid);
+    }
+
+    // 否则按名称搜索并结束
+    kill_by_name(input);
+}
+
+/// 按 PID 结束单个进程
+fn kill_by_pid(pid: u32) {
+    let exe_path = get_process_exe_path(pid);
+    if exe_path.is_none() {
+        print_yellow("⚠ 进程不存在");
+        println!("  PID {pid}");
+        process::exit(2);
+    }
+    let name = exe_path
+        .as_ref()
+        .and_then(|p| Path::new(p).file_name())
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
+
+    unsafe {
+        let handle = OpenProcess(PROCESS_TERMINATE, 0, pid);
+        if handle == 0 || handle == INVALID_HANDLE_VALUE {
+            print_red("❌ 结束失败");
+            eprintln!("  无法打开进程 PID {pid}（权限不足）");
+            process::exit(1);
+        }
+
+        let ret = TerminateProcess(handle, 1);
+        CloseHandle(handle);
+
+        if ret == 0 {
+            print_red("❌ 结束失败");
+            eprintln!("  PID {pid}  {name}");
+            process::exit(1);
+        }
+
+        print_green("✅ 已结束");
+        println!("  PID {pid}  {name}");
+        if let Some(ref ep) = exe_path {
+            println!("       {ep}");
+        }
+    }
+}
+
+/// 按名称搜索并结束所有匹配的进程
+fn kill_by_name(name: &str) {
+    let matches = find_processes(name);
+    if matches.is_empty() {
+        print_yellow(&format!(" 未找到匹配的进程: {name}\n"));
+        return;
+    }
+
+    print_yellow(&format!(" 搜索进程: {name}\n"));
+    let mut killed = 0;
+    let mut failed = 0;
+
+    for (pid, exe_name, _, _) in &matches {
+        unsafe {
+            let handle = OpenProcess(PROCESS_TERMINATE, 0, *pid);
+            if handle == 0 || handle == INVALID_HANDLE_VALUE {
+                print_red("  ✗");
+                println!(" PID {pid:<8} {exe_name}  (权限不足)");
+                failed += 1;
+                continue;
+            }
+
+            let ret = TerminateProcess(handle, 1);
+            CloseHandle(handle);
+
+            if ret == 0 {
+                print_red("  ✗");
+                println!(" PID {pid:<8} {exe_name}");
+                failed += 1;
+            } else {
+                print_green("  ✓");
+                let show_name = exe_name.strip_suffix(".exe").unwrap_or(exe_name);
+                println!(" PID {pid:<8} {show_name}");
+                killed += 1;
+            }
+        }
+    }
+
+    println!();
+    if failed == 0 {
+        print_green(&format!("✅ 共结束 {killed} 个进程\n"));
+    } else {
+        print_yellow(&format!(" 结束 {killed} 个，{failed} 个失败\n"));
+    }
+}
+
+/// 按名称搜索进程，返回 (PID, exe名, 路径, 是否路径匹配)
+fn find_processes(name: &str) -> Vec<(u32, String, Option<String>, bool)> {
+    let mut results = Vec::new();
+    let name_lower = name.to_lowercase();
+
+    unsafe {
+        let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if snapshot == INVALID_HANDLE_VALUE {
+            return results;
+        }
+
+        let mut pe: PROCESSENTRY32W = std::mem::zeroed();
+        pe.dw_size = std::mem::size_of::<PROCESSENTRY32W>() as u32;
+
+        if Process32FirstW(snapshot, &mut pe) != 0 {
+            loop {
+                let exe_name = String::from_utf16_lossy(&pe.sz_exe_file)
+                    .trim_end_matches('\0')
+                    .to_string();
+
+                let name_match = exe_name.to_lowercase().contains(&name_lower);
+                let pid = pe.th32_process_id;
+
+                let (matched, is_path_match, exe_path) = if name_match {
+                    (true, false, get_process_exe_path(pid))
+                } else {
+                    let path = get_process_exe_path(pid);
+                    let matched = path
+                        .as_ref()
+                        .map(|p| p.to_lowercase().contains(&name_lower))
+                        .unwrap_or(false);
+                    (matched, matched, path)
+                };
+
+                if matched {
+                    results.push((pid, exe_name, exe_path, is_path_match));
+                }
+
+                if Process32NextW(snapshot, &mut pe) == 0 {
+                    break;
+                }
+            }
+        }
+
+        CloseHandle(snapshot);
+    }
+
+    results
+}
+
 fn cmd_ps(name: &str) {
     unsafe {
         let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
@@ -773,22 +932,50 @@ fn cmd_ps(name: &str) {
                     .trim_end_matches('\0')
                     .to_string();
 
-                if exe_name.to_lowercase().contains(&name_lower) {
+                let name_match = exe_name.to_lowercase().contains(&name_lower);
+                let pid = pe.th32_process_id;
+
+                // 只有 exe 名不匹配时才查路径（避免不必要的系统调用）
+                let (matched, is_path_match, exe_path) = if name_match {
+                    (true, false, get_process_exe_path(pid))
+                } else {
+                    let path = get_process_exe_path(pid);
+                    let matched = path
+                        .as_ref()
+                        .map(|p| p.to_lowercase().contains(&name_lower))
+                        .unwrap_or(false);
+                    (matched, matched, path)
+                };
+
+                if matched {
                     if !found {
                         print_yellow(&format!(" 搜索进程: {name}\n"));
                         found = true;
                     }
-                    let pid = pe.th32_process_id;
-                    let exe_path = get_process_exe_path(pid);
+                    let ppid = pe.th32_parent_process_id;
+                    let threads = pe.cnt_threads;
+                    let cmd_line = get_process_cmd_line(pid);
+
+                    let show_name = exe_name.strip_suffix(".exe").unwrap_or(&exe_name);
+                    let tag = if is_path_match { " [路径匹配]" } else { "" };
                     print!("   ");
                     print_red("·");
-                    // 去掉 .exe 后缀显示更干净
-                    let show_name = exe_name.strip_suffix(".exe").unwrap_or(&exe_name);
-                    println!(" PID {pid:<8} {show_name}");
+                    println!(" PID {pid:<8} {show_name}{tag}");
+                    println!("           线程: {threads:<4}  父PID: {ppid}");
+
+                    // 始终显示完整路径
                     if let Some(ref ep) = exe_path {
-                        if !ep.ends_with(&exe_name) {
-                            println!("           路径: {ep}");
-                        }
+                        println!("           路径: {ep}");
+                    }
+
+                    // 命令行如果获取到就显示
+                    if let Some(cmd) = cmd_line {
+                        let display = if cmd.len() > 150 {
+                            format!("{}...", &cmd[..150])
+                        } else {
+                            cmd
+                        };
+                        println!("           命令行: {display}");
                     }
                 }
 
