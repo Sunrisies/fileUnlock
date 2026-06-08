@@ -207,6 +207,7 @@ fn main() {
         "delete" | "删除" => cmd_delete(path),
         "ps" | "进程" => cmd_ps(path),
         "kill" | "结束" => cmd_kill(path),
+        "where" | "查找" | "which" => cmd_where(path),
         "rename" | "重命名" | "move" | "移动" => {
             if args.len() < 4 {
                 eprintln!("用法: {} rename <源路径> <目标路径>", args[0]);
@@ -237,7 +238,8 @@ fn print_usage(prog: &str) {
     eprintln!("  {prog} rename  <源路径> <目标>     安全重命名/移动（先检查）");
     eprintln!("  {prog} move    <源路径> <目标>     同上");
     eprintln!("  {prog} ps      <进程名>           搜索正在运行的进程");
-    eprintln!("  {prog} kill    <PID>              结束指定进程");
+    eprintln!("  {prog} kill    <PID/进程名>       结束指定进程");
+    eprintln!("  {prog} where   <程序名>           在 PATH 中查找程序位置");
     eprintln!();
     eprintln!("中文别名（等价）:");
     eprintln!("  check  = 检查");
@@ -246,6 +248,8 @@ fn print_usage(prog: &str) {
     eprintln!("  move   = 移动");
     eprintln!("  ps     = 进程");
     eprintln!("  kill   = 结束");
+    eprintln!("  where  = 查找");
+    eprintln!("  which  = 查找");
     eprintln!();
     eprintln!("例子:");
     eprintln!("  {prog} 检查 Cargo.toml");
@@ -253,6 +257,8 @@ fn print_usage(prog: &str) {
     eprintln!("  {prog} 重命名 old.txt new.txt");
     eprintln!("  {prog} move   源文件.exe D:\\备份\\");
     eprintln!("  {prog} kill   61928");
+    eprintln!("  {prog} where  node");
+    eprintln!("  {prog} 查找   notepad");
     eprintln!();
     eprintln!("参数:");
     eprintln!("  -h, --help    显示此帮助信息");
@@ -990,6 +996,78 @@ fn cmd_ps(name: &str) {
         if !found {
             print_yellow(&format!(" 未找到匹配的进程: {name}\n"));
         }
+    }
+}
+
+// ─── 在 PATH 中查找程序 ────────────────────────────────
+
+/// 在 PATH 中查找可执行文件的位置（类似 Windows `where` 命令）
+fn cmd_where(name: &str) {
+    // 如果已经是完整路径且存在，直接返回
+    let p = Path::new(name);
+    if p.is_absolute() && p.exists() {
+        print_yellow(&format!(" 查找: {name}\n"));
+        print!("   ");
+        print_green("✓");
+        println!(" {name}");
+        return;
+    }
+
+    let path_var = std::env::var_os("PATH").unwrap_or_default();
+    let dirs: Vec<_> = std::env::split_paths(&path_var).collect();
+
+    let pathext_var = std::env::var_os("PATHEXT")
+        .unwrap_or_else(|| std::ffi::OsString::from(".exe;.com;.bat;.cmd"));
+    let pathext: Vec<String> = pathext_var
+        .to_string_lossy()
+        .split(';')
+        .map(|s| s.to_lowercase())
+        .collect();
+
+    let has_ext = pathext.iter().any(|ext| name.to_lowercase().ends_with(ext));
+    let name_lower = name.to_lowercase();
+
+    let mut results: Vec<String> = Vec::new();
+
+    for dir in &dirs {
+        if !dir.is_dir() {
+            continue;
+        }
+
+        if has_ext {
+            let full = dir.join(name);
+            if full.exists() {
+                results.push(full.to_string_lossy().to_string());
+            }
+        } else {
+            for ext in &pathext {
+                let candidate = format!("{}{}", name_lower, ext);
+                let full = dir.join(&candidate);
+                if full.exists() {
+                    results.push(full.to_string_lossy().to_string());
+                    break;
+                }
+            }
+        }
+    }
+
+    // 去重
+    results.sort();
+    results.dedup();
+
+    if results.is_empty() {
+        print_yellow(&format!(" 未找到匹配: {name}\n"));
+        return;
+    }
+
+    print_yellow(&format!(" 查找: {name}\n"));
+    for path in &results {
+        print!("   ");
+        print_green("✓");
+        println!(" {path}");
+    }
+    if results.len() > 1 {
+        println!("  共找到 {} 个位置", results.len());
     }
 }
 
