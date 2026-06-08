@@ -23,7 +23,18 @@ cd fileUnlock
 cargo build --release
 ```
 
-编译产物在 `target\release\FileUnlock.exe`，可加入 PATH 方便使用。
+### 一键安装（推荐）
+
+```bash
+install.bat
+```
+
+安装脚本会自动将 `FileUnlock.exe` 复制到 `%USERPROFILE%\.fileunlock\` 并加入 PATH，
+之后在任何目录下都可直接使用。
+
+### 手动安装
+
+编译产物在 `target\release\FileUnlock.exe`，将其所在目录加入 PATH 即可。
 
 ## 用法
 
@@ -33,6 +44,9 @@ cargo build --release
 | `delete <路径>` | `删除 <路径>` | 安全删除（先检查，被占用则拒绝） |
 | `rename <旧> <新>` | `重命名 <旧> <新>` | 安全重命名/移动（先检查源文件） |
 | `move <旧> <新>` | `移动 <旧> <新>` | 同上 |
+| `ps <进程名>` | `进程 <进程名>` | 搜索正在运行的进程 |
+| `kill <PID/名>` | `结束 <PID/名>` | 结束进程（按 PID 或名称） |
+| `where <程序名>` | `查找 <程序名>` | 在 PATH 中搜索程序位置 |
 
 ### 示例
 
@@ -48,6 +62,15 @@ FileUnlock 删除 D:\temp\临时文件.txt
 # 安全重命名/移动
 FileUnlock rename old.txt new.txt
 FileUnlock 移动 source.exe D:\backup\
+
+# 进程搜索与结束
+FileUnlock ps notepad
+FileUnlock kill 61928
+FileUnlock 结束 notepad
+
+# 查找程序位置
+FileUnlock where node
+FileUnlock 查找 python
 ```
 
 ### 退出码
