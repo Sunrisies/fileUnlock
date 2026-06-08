@@ -11,7 +11,12 @@ if not exist "%EXE_SRC%" (
 
 if not exist "%TARGET_DIR%" mkdir "%TARGET_DIR%"
 copy /Y "%EXE_SRC%" "%TARGET_DIR%\FileUnlock.exe" >nul
-echo [OK] 已复制到 %TARGET_DIR%\FileUnlock.exe
+echo [OK] 已复制 %TARGET_DIR%\FileUnlock.exe
+
+:: 创建快捷别名
+copy /Y "%TARGET_DIR%\FileUnlock.exe" "%TARGET_DIR%\inuse.exe" >nul
+copy /Y "%TARGET_DIR%\FileUnlock.exe" "%TARGET_DIR%\who.exe" >nul
+echo [OK] 别名: inuse.exe, who.exe
 
 :: 检查 PATH 是否已包含
 set OLD_PATH=%TARGET_DIR:\=\\%
@@ -29,8 +34,11 @@ if !errorlevel! equ 0 (
 
 echo.
 echo 安装完成！你现在可以在任何目录下使用：
-echo   FileUnlock --help
-echo   FileUnlock check D:\文件.txt
-echo   FileUnlock ps notepad
-echo   FileUnlock kill 61928
-echo   FileUnlock where node
+echo.
+echo   inuse --help             查看帮助
+echo   inuse check D:\文件.txt  检查文件
+echo   inuse ps notepad         搜索进程
+echo   inuse kill 61928         结束进程
+echo   inuse where node         查找程序位置
+echo.
+echo 三个名字等价: inuse ^= who ^= FileUnlock

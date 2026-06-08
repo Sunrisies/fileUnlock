@@ -29,8 +29,15 @@ cargo build --release
 install.bat
 ```
 
-安装脚本会自动将 `FileUnlock.exe` 复制到 `%USERPROFILE%\.fileunlock\` 并加入 PATH，
-之后在任何目录下都可直接使用。
+安装脚本会自动复制到 `%USERPROFILE%\.fileunlock\` 并加入 PATH。
+
+装好后可以使用三个等价的名字：
+
+```bash
+inuse ps notepad         # 短名，推荐
+who check Cargo.toml     # 短名
+FileUnlock where node    # 原名
+```
 
 ### 手动安装
 
