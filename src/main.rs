@@ -3,6 +3,12 @@ use std::os::windows::ffi::OsStrExt;
 use std::path::Path;
 use std::process;
 
+mod console;
+use console::{print_green, print_red, print_yellow};
+
+mod cli;
+use cli::print_usage;
+
 // ─── Restart Manager API 常量 ───────────────────────────
 
 const CCH_RM_SESSION_KEY: usize = 64;
@@ -25,10 +31,6 @@ unsafe extern "system" {
     ) -> isize;
 
     fn CloseHandle(hObject: isize) -> i32;
-
-    fn GetStdHandle(nStdHandle: u32) -> isize;
-
-    fn SetConsoleTextAttribute(hConsoleOutput: isize, wAttributes: u16) -> i32;
 
     fn OpenProcess(dwDesiredAccess: u32, bInheritHandle: i32, dwProcessId: u32) -> isize;
 
@@ -150,7 +152,6 @@ struct RM_PROCESS_INFO {
 }
 
 const INVALID_HANDLE_VALUE: isize = -1;
-const STD_OUTPUT_HANDLE: u32 = 0xfffffff5;
 
 // File access / share modes
 const GENERIC_READ: u32 = 0x80000000;
@@ -178,12 +179,6 @@ const STATUS_SUCCESS: i32 = 0;
 
 // Toolhelp32
 const TH32CS_SNAPPROCESS: u32 = 0x00000002;
-
-// Console colors
-const FOREGROUND_RED: u16 = 4;
-const FOREGROUND_GREEN: u16 = 2;
-const FOREGROUND_BLUE: u16 = 1;
-const FOREGROUND_INTENSITY: u16 = 8;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -222,104 +217,6 @@ fn main() {
             process::exit(1);
         }
     }
-}
-
-fn print_usage(prog: &str) {
-    let prog = Path::new(prog)
-        .file_name()
-        .map(|n| n.to_string_lossy())
-        .unwrap_or(std::borrow::Cow::Borrowed(prog));
-
-    eprintln!("FileUnlock v1.0 — 检测并安全操作被占用的文件/文件夹 (Windows)");
-    eprintln!();
-    eprintln!("用法:");
-    eprintln!("  {prog} check   <路径>             检查文件是否被占用");
-    eprintln!("  {prog} delete  <路径>             安全删除（先检查）");
-    eprintln!("  {prog} rename  <源路径> <目标>     安全重命名/移动（先检查）");
-    eprintln!("  {prog} move    <源路径> <目标>     同上");
-    eprintln!("  {prog} ps      <进程名>           搜索正在运行的进程");
-    eprintln!("  {prog} kill    <PID/进程名>       结束指定进程");
-    eprintln!("  {prog} where   <程序名>           在 PATH 中查找程序位置");
-    eprintln!();
-    eprintln!("中文别名（等价）:");
-    eprintln!("  check  = 检查");
-    eprintln!("  delete = 删除");
-    eprintln!("  rename = 重命名");
-    eprintln!("  move   = 移动");
-    eprintln!("  ps     = 进程");
-    eprintln!("  kill   = 结束");
-    eprintln!("  where  = 查找");
-    eprintln!("  which  = 查找");
-    eprintln!();
-    eprintln!("例子:");
-    eprintln!("  {prog} 检查 Cargo.toml");
-    eprintln!("  {prog} 删除 D:\\锁定文件.txt");
-    eprintln!("  {prog} 重命名 old.txt new.txt");
-    eprintln!("  {prog} move   源文件.exe D:\\备份\\");
-    eprintln!("  {prog} kill   61928");
-    eprintln!("  {prog} where  node");
-    eprintln!("  {prog} 查找   notepad");
-    eprintln!();
-    eprintln!("参数:");
-    eprintln!("  -h, --help    显示此帮助信息");
-    eprintln!();
-    eprintln!("退出码:");
-    eprintln!("  0  操作成功，或文件未被占用");
-    eprintln!("  1  文件正被占用，操作被拒绝");
-    eprintln!("  2  路径不存在或其他错误");
-}
-
-// ─── 控制台彩色输出 ─────────────────────────────────────
-
-fn set_console_color(red: bool, green: bool, blue: bool, intensity: bool) {
-    unsafe {
-        let handle = GetStdHandle(STD_OUTPUT_HANDLE);
-        if handle == INVALID_HANDLE_VALUE || handle == 0 {
-            return;
-        }
-        let mut attr = FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE; // default white
-        if red {
-            attr |= FOREGROUND_RED;
-        } else {
-            attr &= !FOREGROUND_RED;
-        }
-        if green {
-            attr |= FOREGROUND_GREEN;
-        } else {
-            attr &= !FOREGROUND_GREEN;
-        }
-        if blue {
-            attr |= FOREGROUND_BLUE;
-        } else {
-            attr &= !FOREGROUND_BLUE;
-        }
-        if intensity {
-            attr |= FOREGROUND_INTENSITY;
-        }
-        SetConsoleTextAttribute(handle, attr);
-    }
-}
-
-fn reset_color() {
-    set_console_color(true, true, true, false);
-}
-
-fn print_green(text: &str) {
-    set_console_color(false, true, false, true);
-    print!("{}", text);
-    reset_color();
-}
-
-fn print_red(text: &str) {
-    set_console_color(true, false, false, true);
-    print!("{}", text);
-    reset_color();
-}
-
-fn print_yellow(text: &str) {
-    set_console_color(true, true, false, true);
-    print!("{}", text);
-    reset_color();
 }
 
 // ─── 核心：检测文件/文件夹是否被占用 ────────────────────
