@@ -7,19 +7,16 @@ use console::{print_green, print_red, print_yellow};
 mod cli;
 use cli::print_usage;
 
-mod where_cmd;
-use where_cmd::cmd_where;
-
 mod utils;
 use utils::try_copy_then_delete;
 
 mod win_ffi;
 
-mod proc;
-use proc::{cmd_kill, cmd_ps, print_processes};
+mod platform;
+use platform::{Platform, CurrentPlatform};
 
-mod file_lock;
-use file_lock::{check_in_use, find_locking_processes};
+mod proc;
+use proc::{cmd_kill, cmd_ps};
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -35,15 +32,16 @@ fn main() {
         process::exit(1);
     }
 
+    let platform = CurrentPlatform;
     let cmd = args[1].as_str();
     let path = &args[2];
 
     match cmd {
-        "check" | "检查" => cmd_check(path),
-        "delete" | "删除" => cmd_delete(path),
-        "ps" | "进程" => cmd_ps(path),
-        "kill" | "结束" => cmd_kill(path),
-        "where" | "查找" | "which" => cmd_where(path),
+        "check" | "检查" => cmd_check(&platform, path),
+        "delete" | "删除" => cmd_delete(&platform, path),
+        "ps" | "进程" => cmd_ps(&platform, path),
+        "kill" | "结束" => cmd_kill(&platform, path),
+        "where" | "查找" | "which" => cmd_where(&platform, path),
         "rename" | "重命名" | "move" | "移动" => {
             if args.len() < 4 {
                 eprintln!("用法: {} rename <源路径> <目标路径>", args[0]);
@@ -51,7 +49,7 @@ fn main() {
                 process::exit(1);
             }
             let dst = &args[3];
-            cmd_rename(path, dst);
+            cmd_rename(&platform, path, dst);
         }
         _ => {
             print_usage(&args[0]);
@@ -62,15 +60,48 @@ fn main() {
 
 // ─── 子命令实现 ────────────────────────────────────────
 
-fn cmd_check(path: &str) {
-    match check_in_use(path) {
+/// 打印占用进程列表（平台无关版本）
+fn print_process_list(processes: &[platform::ProcessInfo], checked_path: &str) {
+    for info in processes {
+        let is_self = info
+            .exe_path
+            .as_ref()
+            .map(|ep| utils::paths_equivalent(ep, checked_path))
+            .unwrap_or(false);
+
+        print!("   ");
+        print_red("·");
+        if is_self {
+            println!(" PID {:<8} {}  [自身进程]", info.pid, info.name);
+        } else {
+            println!(" PID {:<8} {}", info.pid, info.name);
+        }
+
+        if !is_self {
+            if let Some(ref ep) = info.exe_path {
+                println!("           路径: {ep}");
+            }
+        }
+
+        if let Some(ref cmd) = info.cmd_line {
+            let display = if cmd.len() > 120 {
+                format!("{}...", &cmd[..120])
+            } else {
+                cmd.clone()
+            };
+            println!("           命令行: {display}");
+        }
+    }
+}
+
+fn cmd_check(platform: &impl Platform, path: &str) {
+    match platform.check_file_in_use(path) {
         Ok(true) => {
             print_red("❌ 占用中");
             println!("  {path}");
-            // 尝试获取占用进程详情
-            match find_locking_processes(path) {
+            match platform.find_locking_processes(path) {
                 Ok(processes) if !processes.is_empty() => {
-                    print_processes(&processes, path);
+                    print_process_list(&processes, path);
                 }
                 Ok(_) => {
                     print_yellow("     未能获取到占用进程详情\n");
@@ -93,7 +124,7 @@ fn cmd_check(path: &str) {
     }
 }
 
-fn cmd_delete(path: &str) {
+fn cmd_delete(platform: &impl Platform, path: &str) {
     let p = Path::new(path);
     if !p.exists() {
         print_yellow("⚠ 不存在");
@@ -101,13 +132,13 @@ fn cmd_delete(path: &str) {
         process::exit(2);
     }
 
-    match check_in_use(path) {
+    match platform.check_file_in_use(path) {
         Ok(true) => {
             print_red("❌ 删除失败");
             println!("  文件正在被其他程序使用，无法删除: {path}");
-            if let Ok(processes) = find_locking_processes(path) {
+            if let Ok(processes) = platform.find_locking_processes(path) {
                 if !processes.is_empty() {
-                    print_processes(&processes, path);
+                    print_process_list(&processes, path);
                 }
             }
             process::exit(1);
@@ -138,7 +169,7 @@ fn cmd_delete(path: &str) {
     }
 }
 
-fn cmd_rename(src: &str, dst: &str) {
+fn cmd_rename(platform: &impl Platform, src: &str, dst: &str) {
     let src_path = Path::new(src);
     if !src_path.exists() {
         print_yellow("⚠ 不存在");
@@ -146,13 +177,13 @@ fn cmd_rename(src: &str, dst: &str) {
         process::exit(2);
     }
 
-    match check_in_use(src) {
+    match platform.check_file_in_use(src) {
         Ok(true) => {
             print_red("❌ 移动/重命名失败");
             println!("  文件正在被其他程序使用，无法操作: {src}");
-            if let Ok(processes) = find_locking_processes(src) {
+            if let Ok(processes) = platform.find_locking_processes(src) {
                 if !processes.is_empty() {
-                    print_processes(&processes, src);
+                    print_process_list(&processes, src);
                 }
             }
             process::exit(1);
@@ -164,7 +195,6 @@ fn cmd_rename(src: &str, dst: &str) {
                     println!("  {src} → {dst}");
                 }
                 Err(e) => {
-                    // 重命名失败（可能是跨卷），尝试复制+删除
                     if src_path.is_file() {
                         match try_copy_then_delete(src_path, dst) {
                             Ok(()) => {
@@ -192,5 +222,24 @@ fn cmd_rename(src: &str, dst: &str) {
             eprintln!("  {e}");
             process::exit(2);
         }
+    }
+}
+
+fn cmd_where(platform: &impl Platform, name: &str) {
+    let results = platform.find_in_path(name);
+
+    if results.is_empty() {
+        print_yellow(&format!(" 未找到匹配: {name}\n"));
+        return;
+    }
+
+    print_yellow(&format!(" 查找: {name}\n"));
+    for path in &results {
+        print!("   ");
+        print_green("✓");
+        println!(" {path}");
+    }
+    if results.len() > 1 {
+        println!("  共找到 {} 个位置", results.len());
     }
 }
