@@ -109,14 +109,6 @@ pub struct PROCESSENTRY32W {
 
 #[repr(C)]
 #[derive(Clone, Copy)]
-pub struct UNICODE_STRING_REMOTE {
-    pub length: u16,
-    pub maximum_length: u16,
-    pub buffer: *mut u16,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
 pub struct FILETIME {
     pub dw_low_date_time: u32,
     pub dw_high_date_time: u32,
@@ -162,9 +154,6 @@ pub const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
 pub const PROCESS_QUERY_INFORMATION: u32 = 0x0400;
 pub const PROCESS_VM_READ: u32 = 0x0010;
 pub const PROCESS_TERMINATE: u32 = 0x0001;
-
-// NtQueryInformationProcess info classes
-pub const PROCESS_COMMAND_LINE_INFORMATION: u32 = 60;
 
 // NTSTATUS
 pub const STATUS_SUCCESS: i32 = 0;

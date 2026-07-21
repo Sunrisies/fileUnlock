@@ -20,6 +20,9 @@ pub trait Platform {
 
     /// 在 PATH 中查找可执行文件，返回所有匹配的完整路径
     fn find_in_path(&self, name: &str) -> Vec<String>;
+
+    /// 查找占用指定端口的进程，返回绑定信息列表
+    fn find_process_by_port(&self, port: u16) -> Result<Vec<PortBinding>, String>;
 }
 
 /// 平台无关的进程信息
@@ -31,6 +34,18 @@ pub struct ProcessInfo {
     pub cmd_line: Option<String>,
     pub parent_pid: Option<u32>,
     pub thread_count: Option<u32>,
+}
+
+/// 端口绑定信息
+#[derive(Debug, Clone)]
+pub struct PortBinding {
+    pub pid: u32,
+    pub port: u16,
+    pub protocol: String,      // TCP / UDP
+    pub local_addr: String,    // e.g. "0.0.0.0:3000"
+    pub process_name: String,
+    pub exe_path: Option<String>,
+    pub cmd_line: Option<String>,
 }
 
 // ─── 平台实现选择 ──────────────────────────────────────

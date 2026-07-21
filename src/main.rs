@@ -41,6 +41,7 @@ fn main() {
         "delete" | "删除" => cmd_delete(&platform, path),
         "ps" | "进程" => cmd_ps(&platform, path),
         "kill" | "结束" => cmd_kill(&platform, path),
+        "port" | "端口" => cmd_port(&platform, path),
         "where" | "查找" | "which" => cmd_where(&platform, path),
         "rename" | "重命名" | "move" | "移动" => {
             if args.len() < 4 {
@@ -241,5 +242,45 @@ fn cmd_where(platform: &impl Platform, name: &str) {
     }
     if results.len() > 1 {
         println!("  共找到 {} 个位置", results.len());
+    }
+}
+
+fn cmd_port(platform: &impl Platform, port_str: &str) {
+    let port: u16 = match port_str.parse() {
+        Ok(p) => p,
+        Err(_) => {
+            print_red("❌ 无效端口号");
+            eprintln!("  {port_str}");
+            process::exit(2);
+        }
+    };
+
+    match platform.find_process_by_port(port) {
+        Ok(bindings) if bindings.is_empty() => {
+            print_yellow(&format!(" 未发现占用端口 {port} 的进程\n"));
+        }
+        Ok(bindings) => {
+            print_yellow(&format!(" 端口 {port} 占用情况:\n"));
+            for b in &bindings {
+                print!("   ");
+                print_green("·");
+                println!(
+                    " PID {:<8} {}  [{}:{}] ",
+                    b.pid, b.process_name, b.protocol, b.port
+                );
+                println!("           地址: {}", b.local_addr);
+                if let Some(ref ep) = b.exe_path {
+                    println!("           路径: {ep}");
+                }
+                if let Some(ref cmd) = b.cmd_line {
+                    println!("           命令: {cmd}");
+                }
+            }
+        }
+        Err(e) => {
+            print_red("❌ 查询失败");
+            eprintln!("  {e}");
+            process::exit(2);
+        }
     }
 }

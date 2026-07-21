@@ -15,6 +15,7 @@ pub fn print_usage(prog: &str) {
     eprintln!("  {prog} move    <源路径> <目标>     同上");
     eprintln!("  {prog} ps      <进程名>           搜索正在运行的进程");
     eprintln!("  {prog} kill    <PID/进程名>       结束指定进程");
+    eprintln!("  {prog} port    <端口号>           查找占用指定端口的进程（显示命令行）");
     eprintln!("  {prog} where   <程序名>           在 PATH 中查找程序位置");
     eprintln!();
     eprintln!("中文别名（等价）:");
@@ -24,6 +25,7 @@ pub fn print_usage(prog: &str) {
     eprintln!("  move   = 移动");
     eprintln!("  ps     = 进程");
     eprintln!("  kill   = 结束");
+    eprintln!("  port   = 端口");
     eprintln!("  where  = 查找");
     eprintln!("  which  = 查找");
     eprintln!();
