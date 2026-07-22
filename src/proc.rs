@@ -110,5 +110,15 @@ pub fn cmd_ps(platform: &impl Platform, name: &str) {
             };
             println!("           命令行: {display}");
         }
+
+        // 显示该进程监听的端口
+        let ports = platform.find_ports_by_pid(info.pid);
+        if !ports.is_empty() {
+            let mut port_nums: Vec<u16> = ports.iter().map(|p| p.port).collect();
+            port_nums.sort();
+            port_nums.dedup();
+            let port_strs: Vec<String> = port_nums.iter().map(|p| p.to_string()).collect();
+            println!("           端口: {}", port_strs.join(", "));
+        }
     }
 }

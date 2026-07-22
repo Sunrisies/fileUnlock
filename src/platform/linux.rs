@@ -231,6 +231,75 @@ impl Platform for LinuxPlatform {
 
         Ok(results)
     }
+
+    fn find_ports_by_pid(&self, pid: u32) -> Vec<PortBinding> {
+        // 1. 收集该 PID 的所有 socket inode
+        let mut inodes: Vec<String> = Vec::new();
+        let fd_dir = format!("/proc/{pid}/fd");
+        if let Ok(fds) = fs::read_dir(&fd_dir) {
+            for entry in fds.flatten() {
+                if let Ok(link) = fs::read_link(entry.path()) {
+                    let s = link.to_string_lossy();
+                    // socket:[12345]
+                    if let Some(inner) = s.strip_prefix("socket:[").and_then(|s| s.strip_suffix(']')) {
+                        inodes.push(inner.to_string());
+                    }
+                }
+            }
+        }
+
+        if inodes.is_empty() {
+            return Vec::new();
+        }
+
+        // 2. 在 /proc/net/* 中查找匹配的 inode
+        let mut results = Vec::new();
+        for (path, proto) in &[
+            ("/proc/net/tcp", "TCP"),
+            ("/proc/net/tcp6", "TCP"),
+            ("/proc/net/udp", "UDP"),
+            ("/proc/net/udp6", "UDP"),
+        ] {
+            let content = match fs::read_to_string(path) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+
+            for line in content.lines().skip(1) {
+                let fields: Vec<&str> = line.split_whitespace().collect();
+                if fields.len() < 10 { continue; }
+
+                // 只显示 LISTEN 状态的端口 (st=0A)，跳过 ESTABLISHED 等临时连接
+                let state = fields[3];
+                if state != "0A" { continue; }
+
+                let inode = fields[9];
+                if !inodes.contains(&inode.to_string()) { continue; }
+
+                let local = fields[1];
+                if let Some(colon_pos) = local.rfind(':') {
+                    let addr_hex = &local[..colon_pos];
+                    let port_hex = &local[colon_pos + 1..];
+                    let port = u16::from_str_radix(port_hex, 16).unwrap_or(0);
+                    let addr = format!("{}:{}", format_addr(addr_hex), port);
+
+                    results.push(PortBinding {
+                        pid,
+                        port,
+                        protocol: proto.to_string(),
+                        local_addr: addr,
+                        process_name: String::new(), // 不需要，外层已知
+                        exe_path: read_exe_path(pid),
+                        cmd_line: read_cmdline(pid),
+                    });
+                }
+            }
+        }
+
+        results.sort_by(|a, b| a.port.cmp(&b.port).then(a.protocol.cmp(&b.protocol)));
+        results.dedup_by(|a, b| a.port == b.port && a.protocol == b.protocol && a.local_addr == b.local_addr);
+        results
+    }
 }
 
 // ─── /proc/net 解析 ────────────────────────────────────

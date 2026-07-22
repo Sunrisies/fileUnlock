@@ -23,6 +23,9 @@ pub trait Platform {
 
     /// 查找占用指定端口的进程，返回绑定信息列表
     fn find_process_by_port(&self, port: u16) -> Result<Vec<PortBinding>, String>;
+
+    /// 查找指定 PID 进程监听的所有端口
+    fn find_ports_by_pid(&self, pid: u32) -> Vec<PortBinding>;
 }
 
 /// 平台无关的进程信息

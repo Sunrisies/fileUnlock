@@ -318,6 +318,34 @@ impl Platform for WindowsPlatform {
 
         Ok(results)
     }
+
+    fn find_ports_by_pid(&self, pid: u32) -> Vec<PortBinding> {
+        let mut results = Vec::new();
+
+        for af in &[AF_INET, AF_INET6] {
+            // TCP
+            if let Ok(bindings) = self.query_all_tcp(*af) {
+                for b in bindings {
+                    if b.pid == pid {
+                        results.push(b);
+                    }
+                }
+            }
+            // UDP
+            if let Ok(bindings) = self.query_all_udp(*af) {
+                for b in bindings {
+                    if b.pid == pid {
+                        results.push(b);
+                    }
+                }
+            }
+        }
+
+        // 去重
+        results.sort_by(|a, b| a.port.cmp(&b.port).then(a.protocol.cmp(&b.protocol)));
+        results.dedup_by(|a, b| a.port == b.port && a.protocol == b.protocol);
+        results
+    }
 }
 
 /// 将路径转为 UTF-16 宽字符串（以 null 结尾）
@@ -747,6 +775,68 @@ impl WindowsPlatform {
             }
 
             Ok(())
+        }
+    }
+
+    /// 返回指定地址族的所有 TCP 绑定（不过滤端口，不获取进程信息）
+    fn query_all_tcp(&self, af: u32) -> Result<Vec<PortBinding>, String> {
+        unsafe {
+            let mut size: u32 = 0;
+            let ret = GetExtendedTcpTable(std::ptr::null_mut(), &mut size, 1, af, TCP_TABLE_OWNER_PID_ALL, 0);
+            if ret != 0 && ret != 122 { return Ok(vec![]); }
+            let mut buffer = vec![0u8; size as usize];
+            let ret = GetExtendedTcpTable(buffer.as_mut_ptr() as *mut std::ffi::c_void, &mut size, 1, af, TCP_TABLE_OWNER_PID_ALL, 0);
+            if ret != 0 { return Ok(vec![]); }
+
+            let num = *(buffer.as_ptr() as *const u32);
+            let base = buffer.as_ptr().add(4);
+            let mut results = Vec::new();
+
+            if af == AF_INET {
+                for i in 0..num as usize {
+                    let row = &*(base as *const MibTcpRowOwnerPid).add(i);
+                    let port = port_from_u32(row.dw_local_port);
+                    results.push(PortBinding { pid: row.dw_owing_pid, port, protocol: "TCP".into(), local_addr: format!("{}:{}", ipv4_from_u32(row.dw_local_addr), port), process_name: String::new(), exe_path: None, cmd_line: None });
+                }
+            } else {
+                for i in 0..num as usize {
+                    let row = &*(base as *const MibTcp6RowOwnerPid).add(i);
+                    let port = port_from_u32(row.dw_local_port);
+                    results.push(PortBinding { pid: row.dw_owing_pid, port, protocol: "TCP".into(), local_addr: format!("[{}]:{}", ipv6_from_bytes(&row.dw_local_addr), port), process_name: String::new(), exe_path: None, cmd_line: None });
+                }
+            }
+            Ok(results)
+        }
+    }
+
+    /// 返回指定地址族的所有 UDP 绑定（不过滤端口，不获取进程信息）
+    fn query_all_udp(&self, af: u32) -> Result<Vec<PortBinding>, String> {
+        unsafe {
+            let mut size: u32 = 0;
+            let ret = GetExtendedUdpTable(std::ptr::null_mut(), &mut size, 1, af, UDP_TABLE_OWNER_PID, 0);
+            if ret != 0 && ret != 122 { return Ok(vec![]); }
+            let mut buffer = vec![0u8; size as usize];
+            let ret = GetExtendedUdpTable(buffer.as_mut_ptr() as *mut std::ffi::c_void, &mut size, 1, af, UDP_TABLE_OWNER_PID, 0);
+            if ret != 0 { return Ok(vec![]); }
+
+            let num = *(buffer.as_ptr() as *const u32);
+            let base = buffer.as_ptr().add(4);
+            let mut results = Vec::new();
+
+            if af == AF_INET {
+                for i in 0..num as usize {
+                    let row = &*(base as *const MibUdpRowOwnerPid).add(i);
+                    let port = port_from_u32(row.dw_local_port);
+                    results.push(PortBinding { pid: row.dw_owing_pid, port, protocol: "UDP".into(), local_addr: format!("{}:{}", ipv4_from_u32(row.dw_local_addr), port), process_name: String::new(), exe_path: None, cmd_line: None });
+                }
+            } else {
+                for i in 0..num as usize {
+                    let row = &*(base as *const MibUdp6RowOwnerPid).add(i);
+                    let port = port_from_u32(row.dw_local_port);
+                    results.push(PortBinding { pid: row.dw_owing_pid, port, protocol: "UDP".into(), local_addr: format!("[{}]:{}", ipv6_from_bytes(&row.dw_local_addr), port), process_name: String::new(), exe_path: None, cmd_line: None });
+                }
+            }
+            Ok(results)
         }
     }
 }
