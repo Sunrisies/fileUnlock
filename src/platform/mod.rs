@@ -56,8 +56,8 @@ mod windows;
 #[cfg(target_os = "windows")]
 pub use windows::WindowsPlatform as CurrentPlatform;
 
-// TODO: 后续添加 Linux/macOS 实现
-// #[cfg(target_os = "linux")]
-// mod linux;
-// #[cfg(target_os = "linux")]
-// pub use linux::LinuxPlatform as CurrentPlatform;
+#[cfg(target_os = "linux")]
+mod linux;
+
+#[cfg(target_os = "linux")]
+pub use linux::LinuxPlatform as CurrentPlatform;

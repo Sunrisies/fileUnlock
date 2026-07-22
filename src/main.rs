@@ -10,6 +10,7 @@ use cli::print_usage;
 mod utils;
 use utils::try_copy_then_delete;
 
+#[cfg(target_os = "windows")]
 mod win_ffi;
 
 mod platform;
