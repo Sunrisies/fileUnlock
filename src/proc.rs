@@ -77,8 +77,14 @@ fn kill_by_name(platform: &impl Platform, name: &str) {
     }
 }
 
-pub fn cmd_ps(platform: &impl Platform, name: &str) {
+pub fn cmd_ps(platform: &impl Platform, name: &str, json: bool) {
     let matches = platform.find_processes(name);
+
+    if json {
+        // JSON 输出模式
+        print_json_ps(platform, name, &matches);
+        return;
+    }
 
     if matches.is_empty() {
         print_yellow(&format!(" 未找到匹配的进程: {name}\n"));
@@ -121,4 +127,63 @@ pub fn cmd_ps(platform: &impl Platform, name: &str) {
             println!("           端口: {}", port_strs.join(", "));
         }
     }
+}
+
+/// JSON 输出 ps 结果（零依赖手动格式化）
+fn print_json_ps(platform: &impl Platform, query: &str, matches: &[crate::platform::ProcessInfo]) {
+    println!("{{");
+    println!("  \"query\": {},", json_str(query));
+    println!("  \"count\": {},", matches.len());
+    println!("  \"results\": [");
+
+    for (i, info) in matches.iter().enumerate() {
+        let ports = platform.find_ports_by_pid(info.pid);
+        let mut port_nums: Vec<u16> = ports.iter().map(|p| p.port).collect();
+        port_nums.sort();
+        port_nums.dedup();
+
+        let comma = if i + 1 < matches.len() { "," } else { "" };
+
+        println!("    {{");
+        println!("      \"pid\": {},", info.pid);
+        println!("      \"name\": {},", json_str(&info.name));
+
+        match &info.exe_path {
+            Some(ep) => println!("      \"exe_path\": {},", json_str(ep)),
+            None => println!("      \"exe_path\": null,"),
+        }
+
+        match &info.cmd_line {
+            Some(cl) => println!("      \"cmd_line\": {},", json_str(cl)),
+            None => println!("      \"cmd_line\": null,"),
+        }
+
+        match info.parent_pid {
+            Some(ppid) => println!("      \"parent_pid\": {ppid},"),
+            None => println!("      \"parent_pid\": null,"),
+        }
+
+        match info.thread_count {
+            Some(tc) => println!("      \"thread_count\": {tc},"),
+            None => println!("      \"thread_count\": null,"),
+        }
+
+        let ports_json: Vec<String> = port_nums.iter().map(|p| p.to_string()).collect();
+        println!("      \"ports\": [{}]", ports_json.join(", "));
+        println!("    }}{comma}");
+    }
+
+    println!("  ]");
+    println!("}}");
+}
+
+/// JSON 字符串转义
+fn json_str(s: &str) -> String {
+    let escaped = s
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
+        .replace('\t', "\\t");
+    format!("\"{escaped}\"")
 }

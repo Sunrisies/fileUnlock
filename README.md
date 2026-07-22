@@ -66,7 +66,7 @@ WhoUse where node    # 原名
 | `delete <路径>` | `删除` | 安全删除（先检查，被占用则拒绝） |
 | `rename <旧> <新>` | `重命名` | 安全重命名/移动（先检查源文件） |
 | `move <旧> <新>` | `移动` | 同上 |
-| `ps <进程名>` | `进程` | 搜索进程（显示路径、命令行、**监听端口**） |
+| `ps <进程名>` | `进程` | 搜索进程（显示路径、命令行、**监听端口**），支持 `--json` |
 | `kill <PID/名>` | `结束` | 结束进程（按 PID 或名称） |
 | `port <端口号>` | `端口` | **查找占用指定端口的进程** |
 | `where <程序名>` | `查找` | 在 PATH 中搜索程序位置 |
@@ -101,6 +101,36 @@ WhoUse ps nginx
            路径: /work/inst/jdk1.8.0_144/bin/java
            命令行: java -Xms512m -Xmx2048m -jar 3sai-admin-1.0.0.jar
            端口: 8080, 8848
+```
+
+### JSON 输出（脚本集成）
+
+```bash
+# 输出 JSON 格式，便于脚本解析
+WhoUse ps node --json
+
+# 输出示例
+{
+  "query": "node",
+  "count": 3,
+  "results": [
+    {
+      "pid": 43256,
+      "name": "node.exe",
+      "exe_path": "C:\\nvm4w\\nodejs\\node.exe",
+      "cmd_line": "node server.js",
+      "parent_pid": 35376,
+      "thread_count": 65,
+      "ports": [8080]
+    }
+  ]
+}
+
+# 管道组合：找出有端口的进程
+WhoUse ps java --json | jq '.results[] | select(.ports | length > 0)'
+
+# Python 处理
+WhoUse ps node --json | python3 -c "import sys,json; print(json.load(sys.stdin)['count'])"
 ```
 
 ### 文件锁检测

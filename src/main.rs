@@ -37,10 +37,13 @@ fn main() {
     let cmd = args[1].as_str();
     let path = &args[2];
 
+    // 检查全局 --json flag
+    let json = args.iter().any(|a| a == "--json");
+
     match cmd {
         "check" | "检查" => cmd_check(&platform, path),
         "delete" | "删除" => cmd_delete(&platform, path),
-        "ps" | "进程" => cmd_ps(&platform, path),
+        "ps" | "进程" => cmd_ps(&platform, path, json),
         "kill" | "结束" => cmd_kill(&platform, path),
         "port" | "端口" => cmd_port(&platform, path),
         "where" | "查找" | "which" => cmd_where(&platform, path),
