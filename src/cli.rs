@@ -6,7 +6,7 @@ pub fn print_usage(prog: &str) {
         .map(|n| n.to_string_lossy())
         .unwrap_or(std::borrow::Cow::Borrowed(prog));
 
-    eprintln!("FileUnlock v1.0 — 检测并安全操作被占用的文件/文件夹 (Windows)");
+    eprintln!("WhoUse v2.0 — 跨平台进程/端口/文件占用查询工具");
     eprintln!();
     eprintln!("用法:");
     eprintln!("  {prog} check   <路径>             检查文件是否被占用");
